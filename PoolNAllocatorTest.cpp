@@ -334,58 +334,93 @@ private:
         default: return "";
         }
     }
-
-    struct param_data
+    struct ProdData
+    {
+        // 생산자 소비자 스레드 작동을 위해
+        LockVector<void*> m_lockVec;
+        CONDITION_VARIABLE m_cvProduced;
+        CONDITION_VARIABLE m_cvConsumed;
+        char m_bProduced;
+        char m_bConsumed;
+    };
+    struct ParamData
     {
         FuncType m_funcType;    // 실행 함수 번호
         int m_iTargetCnt;   // 반복 횟수
         Role m_role;        // 생산자 / 소비자 역할
         
-        LockVector<void*>* m_pLockVec;
+        ProdData* m_pProdData;
         MultiMode* m_pThis;
     };
     static unsigned WINAPI DoMulti(LPVOID lparam)
     {
         // 요소를 복사한다.
-        param_data params = *reinterpret_cast<param_data*>(lparam);
+        ParamData params = *reinterpret_cast<ParamData*>(lparam);
 
         WaitForSingleObject(g_hStarterHandle, INFINITE);
 
         switch (params.m_funcType)
         {
         case FuncType::DEFAULT_ALLOC_TEST: params.m_pThis->DefaultAllocTest(params.m_iTargetCnt);break;
-        case FuncType::PRODUCER_CONSUMER_TEST:params.m_pThis->ProducerConsumerTest(params.m_iTargetCnt, params.m_role, params.m_pLockVec); break;
+        case FuncType::PRODUCER_CONSUMER_TEST:params.m_pThis->ProducerConsumerTest(params.m_iTargetCnt, params.m_role, params.m_pProdData); break;
         case FuncType::RANDOM_ALLOC_TEST: break;
         }
 
         return 0;
     }
-    void ProducerConsumerTest(int targetCnt, Role role, LockVector<void*>* lockVec)
+    void ProducerConsumerTest(int targetCnt, Role role, ProdData* prodData)
     {
         // yet    
         printf("------------- RandomAllocTest..... ------------\n");
         const int max_idx = GetMaxAllocSize();
 
-        std::vector<void*>& vec = lockVec->m_vec;
+  
+        std::vector<void*>& vec = prodData->m_lockVec.m_vec;
+        PSRWLOCK srwlock = &prodData->m_lockVec.m_lock;
 
         for (int i = 0; i < g_iAllocLoopCnt; i++)
         {
             if (i % 400 == 0)
                 printf("%s Thread ID : [%5d], loop_cnt : [%d]\n", role == Role::PRODUCER ? "Producer" : "Consumer", GetCurrentThreadId(), i);
            
-            SRWLockGuard lockGuard(&lockVec->m_lock);
-            for (int j = 0; j < targetCnt; j++)
+            SRWLockGuard lockGuard(srwlock);
+
+            // Producer는 consumer가 소비한 후 제공하도록 해야한다.
+            if (Role::PRODUCER == role)
             {
+                // bConsumed 0 -> 0 이면 아직 처리되지 않았음.
+                // bConsumed 1 -> 0 이면 consumer가 처리 -> for문으로 진입한다.
+                while (InterlockedExchange8(&prodData->m_bConsumed, 0) == 0)
+                {
+                    // cv : lock 해제 후 consumed 활성화 될때까지 대기 -> consumed 활성화되면 깨어났을때 lock 획득
+                    SleepConditionVariableSRW(&prodData->m_cvConsumed, srwlock, INFINITE, 0);
+                }
+
                 // alloc_size에 나온 사이즈중 하나를 랜덤으로 뽑아 할당
-                if (Role::PRODUCER == role)
+                for (int j = 0; j < targetCnt; j++)
                 {
                     int rand_idx = jh::MyRandom::GetRandInt(0, max_idx - 1);
                     vec[j] = g_pMemSystem->Alloc(g_iAllocSize[rand_idx]);
 
                     if (false == TestWrite(vec[j]))
-                        jh_utility::CrashDump::Crash();
+                        jh_utility::CrashDump::Crash();    
                 }
-                else // consumer는 Producer가 제공을 한 후에 소비하도록 변경해야한다. cv를 활용하도록 하자.
+                
+                InterlockedExchange8(&prodData->m_bProduced, 1);
+                WakeConditionVariable(&prodData->m_cvProduced);
+
+            }
+            else // consumer는 Producer가 제공을 한 후에 소비하도록 해야한다.
+            {
+                // bConsumed 0 -> 0 이면 아직 처리되지 않았음.
+                // bConsumed 1 -> 0 이면 consumer가 처리 -> for문으로 진입한다.
+                while (InterlockedExchange8(&prodData->m_bProduced, 0) == 0)
+                {
+                    // cv : lock 해제 후 consumed 활성화 될때까지 대기 -> consumed 활성화되면 깨어났을때 lock 획득
+                    SleepConditionVariableSRW(&prodData->m_cvProduced, srwlock, INFINITE, 0);
+                }
+
+                for (int j = 0; j < targetCnt; j++)
                 {
                     if (false == TestRead(vec[j]))
                         jh_utility::CrashDump::Crash();
@@ -394,6 +429,9 @@ private:
 
                     vec[j] = nullptr;
                 }
+
+                InterlockedExchange8(&prodData->m_bConsumed, 1);
+                WakeConditionVariable(&prodData->m_cvConsumed);
             }
         }
     }
@@ -406,25 +444,35 @@ private:
     {
         std::vector<HANDLE> threads(threadCnt, nullptr);
         const int groupCnt = threadCnt / 2 + 1;
-        param_data* data = new param_data[threadCnt];
+        ParamData* data = new ParamData[threadCnt];
 
-        LockVector<void*>* pLockVec = nullptr;
+        ProdData* prodData = nullptr;
         if (funcType == FuncType::PRODUCER_CONSUMER_TEST)
         {
-            pLockVec = new LockVector<void*>[groupCnt];
+            prodData = new ProdData[groupCnt];
+
             for(int i =0;i<groupCnt;i++)
             {
-                pLockVec[i].m_vec.resize(targetCnt, nullptr);
+                prodData[i].m_lockVec.m_vec.resize(targetCnt, nullptr);
+
+                InitializeConditionVariable(&prodData[i].m_cvProduced);
+                InitializeConditionVariable(&prodData[i].m_cvConsumed);
+
+                prodData[i].m_bProduced = 0;
+                
+                // 생산자 start를 위해 설정
+                prodData[i].m_bConsumed = 1;
             }
         }
         for (int i = 0; i < threadCnt; i++)
         {
+            const int groupNum = i / 2;
             data[i].m_funcType = funcType;
             data[i].m_role = static_cast<Role>(static_cast<int>(i) % 2);
             data[i].m_iTargetCnt = targetCnt;
             data[i].m_pThis = this;
 
-            data[i].m_pLockVec = pLockVec == nullptr ? nullptr : &pLockVec[i / 2];
+            data[i].m_pProdData = prodData == nullptr ? nullptr : &prodData[groupNum];
         }
     
 
@@ -455,6 +503,9 @@ private:
         {
             jh_utility::CrashDump::Crash();
         }
+
+        delete[] prodData;
+        delete[] data;
 
     }
     // 멀티 스레드 환경에서 중복된 영역으로 할당이 되는지 확인
@@ -497,7 +548,7 @@ int main(int argc, char* argv[])
     // 6. 모든 것이 잘 동작한다면, 그것의 속도는 new/delete와 같은 기존의 방식에 비교해서 어떠한 장점이 있는가??
 
     InitMain();
-
+    
     bool end_flag = false;
     while (false == end_flag)
     {
