@@ -9,6 +9,7 @@ namespace jh
 		// 용도 : static GetRand
 		MyRandom() = delete;
 
+		// [start, end] 구간에 대해 랜덤값 추출
 		static int GetRandInt(int s, int e) 
 		{
 			//static thread_local std::random_device rd;

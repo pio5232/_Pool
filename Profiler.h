@@ -12,8 +12,10 @@
 
 #ifdef _DEBUG
 #define PRO_START_AUTO_FUNC jh_utility::AutoProfiler ra(PROF_WFUNC)
+#define PRO_START_AUTO_WNAME(x) jh_utility::AutoProfiler ra(x)
 #else
 #define PRO_START_AUTO_FUNC jh_utility::AutoProfiler ra(PROF_WFUNC)
+#define PRO_START_AUTO_WNAME(x) jh_utility::AutoProfiler ra(x)
 #endif
 
 #define PRO_START(x) jh_utility::Profiler::GetInstance().Start(L##x)
@@ -106,18 +108,18 @@ namespace jh_utility
 	class AutoProfiler
 	{
 	public:
-		AutoProfiler(const WCHAR* functionName) : currentFunctionName{ functionName }
+		AutoProfiler(const WCHAR* functionName) : m_kCurrentFunctionName{ functionName }
 		{
-			jh_utility::Profiler::GetInstance().Start(currentFunctionName);
+			jh_utility::Profiler::GetInstance().Start(m_kCurrentFunctionName);
 		}
 		~AutoProfiler() {
 
-			jh_utility::Profiler::GetInstance().Stop(currentFunctionName);
-			currentFunctionName = nullptr;
+			jh_utility::Profiler::GetInstance().Stop(m_kCurrentFunctionName);
+			m_kCurrentFunctionName = nullptr;
 		}
 
 	private:
-		const WCHAR* currentFunctionName = nullptr;
+		const WCHAR* m_kCurrentFunctionName = nullptr;
 	};
 }
 extern thread_local jh_utility::ThreadProfileData* tls_pProfiler;

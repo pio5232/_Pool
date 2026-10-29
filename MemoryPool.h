@@ -44,7 +44,7 @@ namespace jh
 		}
 
 	private:
-		const size_t m_allocSize;
+		const size_t m_kAllocSize;
 		PageAllocator* m_pPageAllocator;
 
 		// MemoryAllocator 존재하는 스레드 종료 시 남아있는 잉여 노드들의 저장을 위해 락 사용

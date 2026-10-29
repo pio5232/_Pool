@@ -2,7 +2,7 @@
 #include "MemoryPool.h"
 #include "PageAllocator.h"
 
-jh::MemoryPool::MemoryPool(size_t allocSize) : m_allocSize{ allocSize }, m_llComplexFullNode{}, m_pPartialNodeHead{}, m_partialNodeCount{}, m_pPageAllocator{}, m_llComplexCounter{}
+jh::MemoryPool::MemoryPool(size_t allocSize) : m_kAllocSize{ allocSize }, m_llComplexFullNode{}, m_pPartialNodeHead{}, m_partialNodeCount{}, m_pPageAllocator{}, m_llComplexCounter{}
 {
 	InitializeSRWLock(&m_partialLock);
 	InitializeSRWLock(&m_allocationLock);
@@ -153,7 +153,7 @@ jh::Node* jh::MemoryPool::GetNewBlock()
 {
 	MEMORY_POOL_PROFILE_FLAG;
 
-	size_t granularitySize = kNodeCountToCreate / (jh::kAllocationGranularity / m_allocSize);
+	size_t granularitySize = kNodeCountToCreate / (jh::kAllocationGranularity / m_kAllocSize);
 
 	//	블록 크기								64,		128,	256,	512,	1024,	2048,	4096
 	//	allocationGranurity 당 노드 수			1024,	512,	256,	128,	64,		32,		16
@@ -182,7 +182,7 @@ jh::Node* jh::MemoryPool::GetNewBlock()
 			// 블럭 단위로 연결
 			for (; numOfBlock < kBlockCountToCreate; numOfBlock++)
 			{
-				size_t addr = reinterpret_cast<size_t>(allocatedPoitner) + (numOfBlock * m_allocSize * kNodeCountPerBlock);
+				size_t addr = reinterpret_cast<size_t>(allocatedPoitner) + (numOfBlock * m_kAllocSize * kNodeCountPerBlock);
 
 				// N번째 블락의 시작점은 [시작점 + (풀 할당 크기 * 블럭당 노드 수)] 이다.
 				Node* blockBaseNode = reinterpret_cast<Node*>(addr);
@@ -200,13 +200,13 @@ jh::Node* jh::MemoryPool::GetNewBlock()
 				// Node단위로 연결
 				for (size_t numOfNode = 0; numOfNode < kNodeCountPerBlock - 1; numOfNode++)
 				{
-					Node* curNode = reinterpret_cast<Node*>(addr + numOfNode * m_allocSize);
-					Node* nextNode = reinterpret_cast<Node*>(addr + (numOfNode + 1) * m_allocSize);
+					Node* curNode = reinterpret_cast<Node*>(addr + numOfNode * m_kAllocSize);
+					Node* nextNode = reinterpret_cast<Node*>(addr + (numOfNode + 1) * m_kAllocSize);
 
 					curNode->m_pNextNode = nextNode;
 				}
 				// 블럭의 마지막 노드 값 설정
-				Node* lastNodeInBlock = reinterpret_cast<Node*>(addr + (kNodeCountPerBlock - 1) * m_allocSize);
+				Node* lastNodeInBlock = reinterpret_cast<Node*>(addr + (kNodeCountPerBlock - 1) * m_kAllocSize);
 				lastNodeInBlock->m_pNextNode = nullptr;
 
 				lastBlock = blockBaseNode;

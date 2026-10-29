@@ -8,13 +8,12 @@
 #include "Rand.h"
 #include "SRWLockGuard.h"
 
-const int g_iRandMin = 1e4;
-const int g_iRandMax = 1e5;
+const int g_kRandMin = 1e4;
+const int g_kRandMax = 1e5;
 
-const int g_iAllocLoopCnt = 2e3;
-const int g_iAllocSize[]{ 4,40,400, 1000 };
+const int g_kAllocSize[]{ 4,40,400, 1222 };
 
-const unsigned int g_iTestMax = 0xff'ff'ff'ff;
+const unsigned int g_kTestMax = 0xff'ff'ff'ff;
 
 struct test_sample
 {
@@ -60,9 +59,9 @@ void ClearMain()
 }
 
 
-inline int GetMaxAllocSize()
+inline int GetAllocSizeCnt()
 {
-    return sizeof(g_iAllocSize) / sizeof(g_iAllocSize[0]);
+    return sizeof(g_kAllocSize) / sizeof(g_kAllocSize[0]);
 }
 inline void NewLine() {
     printf("\n\n\n\n\n\n\n");
@@ -121,7 +120,210 @@ private:
     virtual bool TestRead(void* p, int rqst_size) = 0;
 
 protected:
-    void DefaultAllocTest(int targetCnt, int threadCnt = 1)
+    static const int kAllocLoopCnt = 2e3;
+
+    enum AllocationOp
+    {
+        OP_MY_ALLOC = 0,
+        OP_MY_FREE,
+        OP_NEW,
+        OP_DEL,
+        ALLOCATION_MAX,
+    };
+
+    const WCHAR* kOpStr[ALLOCATION_MAX] = {L"MyAlloc",L"MyFree",L"New",L"Delete"};
+    
+    // 변수 할당의 크기가 n개중 랜덤으로 요청되는 테스트
+    void RecordRandomAllocTest(int allocFreeRqstCnt, bool isSingleMode, bool usePool,int loopRqstCnt = kAllocLoopCnt, const WCHAR* comment = L"")
+    {
+        std::mt19937 gen(0);
+
+        const int maxIdx = GetAllocSizeCnt();
+        std::vector<void*> pointers(allocFreeRqstCnt, nullptr);
+        
+        // 랜덤 사이즈 저장용
+        std::vector<int> sizeVector(allocFreeRqstCnt);        
+        
+        // 할당 횟수 / 사이즈n개 나누기
+        for (int i = 0; i < sizeVector.size(); i++)
+        {
+            sizeVector[i] = g_kAllocSize[i % maxIdx];
+        }
+
+        std::shuffle(sizeVector.begin(), sizeVector.end(), gen);
+
+        for (int sizeIdx = 0; sizeIdx < maxIdx; sizeIdx++)
+        {
+            WCHAR buffer[ALLOCATION_MAX][100]{};
+            const WCHAR* str[ALLOCATION_MAX];
+
+            for (int i = 0; i < ALLOCATION_MAX; i++)
+            {
+                wsprintf(buffer[i], L"%s %s_Size_%d_%s%s", isSingleMode ? L"Single" : L"Multi", PROF_WFUNC, g_kAllocSize[sizeIdx], kOpStr[i], comment);
+
+                str[i] = buffer[i];
+            }
+
+            for (int i = 0; i < loopRqstCnt + 1; i++)
+            {
+                for (int j = 0; j < allocFreeRqstCnt; j++)
+                {
+                    int allocSize = sizeVector[j];
+                    // alloc_size에 나온 사이즈중 하나를 랜덤으로 뽑아 할당
+                    if (i > 0)
+                    {
+                        if (usePool)
+                        {
+                            PRO_START_AUTO_WNAME(buffer[OP_MY_ALLOC]);
+
+                            pointers[j] = { g_pMemSystem->Alloc(allocSize) };
+                        }
+                        else
+                        {
+                            PRO_START_AUTO_WNAME(buffer[OP_NEW]);
+                            
+                            pointers[j] = ::operator new (allocSize);
+                        }
+                    }
+                    else
+                    {
+                        if (usePool)
+                        {
+                            pointers[j] = { g_pMemSystem->Alloc(allocSize) };
+                        }
+                        else
+                        {
+                            pointers[j] = ::operator new (allocSize);
+                        }
+                    }
+                }
+
+                // 역방향 Free >>> NodeStack이니까 최대한 캐시히트를 많이 만들어내자.
+                for (int j = allocFreeRqstCnt-1; j >= 0; j--)
+                {
+                    void*& p = pointers[j];
+                    
+                    if (i > 0)
+                    {
+                        if (usePool)
+                        {
+                            PRO_START_AUTO_WNAME(buffer[OP_MY_FREE]);
+
+                            g_pMemSystem->Free(p);
+                        }
+                        else
+                        {
+                            PRO_START_AUTO_WNAME(buffer[OP_DEL]);
+                            
+                            ::operator delete(p);
+                        }
+                    }
+                    else
+                    {
+                        if (usePool)
+                        {
+                            g_pMemSystem->Free(p);
+                        }
+                        else
+                        {
+                            ::operator delete(p);
+                        }
+                    }
+
+                    p = nullptr;
+                }
+            }
+        }
+    }
+    // 변수 할당의 크기가 고정된 형태의 테스트
+    void RecordSimpleAllocTest(int allocFreeRqstCnt, bool isSingleMode, bool usePool,int loopRqstCnt = kAllocLoopCnt, const WCHAR* comment = L"")
+    {
+        const int maxIdx = GetAllocSizeCnt();
+        std::vector<void*> pointers(allocFreeRqstCnt, nullptr);
+     
+        for (int allocSize : g_kAllocSize)
+        {
+            WCHAR buffer[ALLOCATION_MAX][100]{};
+            const WCHAR* str[ALLOCATION_MAX]; 
+          
+            for (int i = 0; i < ALLOCATION_MAX; i++)
+            {
+                wsprintf(buffer[i], L"%s %s_Size_%d_%s%s", isSingleMode ? L"Single" : L"Multi", PROF_WFUNC, allocSize, kOpStr[i],comment);
+
+                str[i] = buffer[i];
+            }
+            
+            for (int i = 0; i < loopRqstCnt + 1; i++)
+            {
+                for (int j = 0; j < allocFreeRqstCnt; j++)
+                {
+                    // alloc_size에 나온 사이즈중 하나를 랜덤으로 뽑아 할당
+                    if (i > 0)
+                    {
+                        if (usePool)
+                        {
+                            PRO_START_AUTO_WNAME(buffer[OP_MY_ALLOC]);
+
+                            pointers[j] = { g_pMemSystem->Alloc(allocSize) };
+                        }
+                        else
+                        {
+                            PRO_START_AUTO_WNAME(buffer[OP_NEW]);
+
+                            pointers[j] = ::operator new (allocSize);
+                        }
+                    }
+                    else
+                    {
+                        if (usePool)
+                        {
+                            pointers[j] = { g_pMemSystem->Alloc(allocSize) };
+                        }
+                        else
+                        {
+                            pointers[j] = ::operator new (allocSize);
+                        }
+                    }
+                }
+
+                // 역방향 Free >>> NodeStack이니까 최대한 캐시히트를 많이 만들어내자.
+                for (int j = allocFreeRqstCnt - 1; j >= 0; j--)
+                {
+                    void*& p = pointers[j];
+                    
+                    if (i > 0)
+                    {
+                        if (usePool)
+                        {
+                            PRO_START_AUTO_WNAME(buffer[OP_MY_FREE]);
+
+                            g_pMemSystem->Free(p);
+                        }
+                        else
+                        {
+                            PRO_START_AUTO_WNAME(buffer[OP_DEL]);
+
+                            ::operator delete(p);
+                        }
+                    }
+                    else
+                    {
+                        if (usePool)
+                        {
+                            g_pMemSystem->Free(p);
+                        }
+                        else
+                        {
+                            ::operator delete(p);
+                        }
+                    }
+
+                    p = nullptr;
+                }
+            }
+        }
+    }
+    void DefaultAllocTest(int allocRqstCnt, int freeRqstCnt, int loopRqstCnt = kAllocLoopCnt)
     {
         printf("------------------ AllocTest ------------------\n");
 
@@ -131,35 +333,54 @@ protected:
         // 3. 할당/반복의 횟수가 정확한가? 테스트
         // 4. 요청한 사이즈의 할당/반환이 정확하게 되는가? 테스트
         // idx
-        const int max_idx = GetMaxAllocSize();
+        const int maxIdx = GetAllocSizeCnt();
 
-        std::vector<std::pair<void*, int>> pointers(targetCnt, { nullptr,0 });
+        std::vector<std::pair<void*, int>> pointers(allocRqstCnt, { nullptr,0 });
 
         // 할당 개수 확인 변수
-        std::vector<int> alloc_cnt(max_idx, 0);
+        std::vector<int> alloc_cnt(maxIdx, 0);
 
-        for (int i = 0; i < g_iAllocLoopCnt; i++)
+        for (int i = 0; i < loopRqstCnt; i++)
         {
             if (i % 400 == 0)
                 printf("Thread ID : [%5d] loop_cnt : [%d]\n", GetCurrentThreadId(), i);
 
-            for (int j = 0; j < targetCnt; j++)
+            for (int j = 0; j < allocRqstCnt; j++)
             {
                 // alloc_size에 나온 사이즈중 하나를 랜덤으로 뽑아 할당
-                int rand_idx = jh::MyRandom::GetRandInt(0, max_idx - 1);
-                pointers[j] = { g_pMemSystem->Alloc(g_iAllocSize[rand_idx]), rand_idx };
+                int rand_idx = jh::MyRandom::GetRandInt(0, maxIdx - 1);
+                pointers[j] = { g_pMemSystem->Alloc(g_kAllocSize[rand_idx]), rand_idx };
                 alloc_cnt[rand_idx]++;
 
-                if (false == TestWrite(pointers[j].first, g_iAllocSize[rand_idx]))
+                if (false == TestWrite(pointers[j].first, g_kAllocSize[rand_idx]))
                     jh_utility::CrashDump::Crash();
 
             }
 
-            for (int j = 0; j < targetCnt; j++)
+            for (int j = 0; j < freeRqstCnt; j++)
             {
                 auto [p, rand_idx] = pointers[j];
 
-                if (false == TestRead(p, g_iAllocSize[rand_idx]))
+                if (false == TestRead(p, g_kAllocSize[rand_idx]))
+                    jh_utility::CrashDump::Crash();
+
+                g_pMemSystem->Free(p);
+                alloc_cnt[rand_idx]--;
+
+                pointers[j] = {};
+            }
+
+            // allocRqstCnt != freeRqstCnt 테스트 (Multi - RandomAllocTest) 정리
+            if (allocRqstCnt == freeRqstCnt)
+                continue;
+
+            Sleep(0);
+
+            for (int j = freeRqstCnt; j < allocRqstCnt; j++)
+            {
+                auto [p, rand_idx] = pointers[j];
+
+                if (false == TestRead(p, g_kAllocSize[rand_idx]))
                     jh_utility::CrashDump::Crash();
 
                 g_pMemSystem->Free(p);
@@ -169,16 +390,17 @@ protected:
             }
         }
 
-        for (int i = 0; i < max_idx; i++)
+        for (int i = 0; i < maxIdx; i++)
         {
-            printf("\t\t[AllocTest] size : %d, cnt : %d\n", g_iAllocSize[i], alloc_cnt[i]);
+            printf("[AllocTest]\t\tThread ID : [%5d], vector[%d]'s size : [%5d], cnt : [%5d]\n",GetCurrentThreadId(), i, g_kAllocSize[i], alloc_cnt[i]);
 
             if (alloc_cnt[i] != 0)
                 jh_utility::CrashDump::Crash();
         }
+
     }
 private:
-    const int m_iExtraThreadCnt = 0;
+    const int m_iExtraThreadCnt = 4;
 };
 
 Mode::~Mode() = default;
@@ -197,14 +419,15 @@ public:
     void AllocTest() override
     {
         printf("------------- do_single_thread_test ------------\n");
-        const int alloc_rqst_cnt = jh::MyRandom::GetRandInt(g_iRandMin, g_iRandMax);
-        const int realloc_rast_cnt = jh::MyRandom::GetRandInt(g_iRandMin, g_iRandMax) / 10;
+        const int allocRqstCnt = jh::MyRandom::GetRandInt(g_kRandMin, g_kRandMax);
+        const int reallocRqstCnt = jh::MyRandom::GetRandInt(g_kRandMin, g_kRandMax) / 10;
 
-        DefaultAllocTest(alloc_rqst_cnt);
+        // alloc, free 횟수가 동일
+        DefaultAllocTest(allocRqstCnt, allocRqstCnt);
         g_pMemSystem->PrintMemoryUsage();
 
         // 최대 512
-        ReallocTest(realloc_rast_cnt, 300);
+        ReallocTest(reallocRqstCnt, 300);
         g_pMemSystem->PrintMemoryUsage();
 
         g_myPdh.Print();
@@ -235,7 +458,7 @@ private:
     {
 
         printf("----------------- ReallocTest -----------------\n");
-        const int max_idx = GetMaxAllocSize();
+        const int max_idx = GetAllocSizeCnt();
 
         // 각 size별로 중복체크를 위한 배열
         std::vector<std::vector<void*>> pointers(max_idx, std::vector<void*>(allocCnt, nullptr));
@@ -250,7 +473,7 @@ private:
             {
                 for (int curAllocCnt = 0; curAllocCnt < allocCnt; curAllocCnt++)
                 {
-                    void* p = g_pMemSystem->Alloc(g_iAllocSize[idx]);
+                    void* p = g_pMemSystem->Alloc(g_kAllocSize[idx]);
                     void*& cur = pointers[idx][curAllocCnt];
 
                     // 처음의 경우에만 할당, 그 뒤엔 내가 반납한 주소가 그대로 할당되는지 확인한다. (stack구조, L1이 반납되지 않는 선에서)
@@ -286,9 +509,9 @@ public :
         printf("------------- do_multi_thread_test ------------\n");
         const int threadCnt = GetAvailableProcessors() + GetExtraThreadCnt();
         const int threadGroupCnt = threadCnt * 2;
-        const int allocRqstCnt = jh::MyRandom::GetRandInt(g_iRandMin, g_iRandMax) / 2;
+        const int allocRqstCnt = jh::MyRandom::GetRandInt(g_kRandMin, g_kRandMax) / 2;
 
-        for (int i = 1; i < static_cast<int>(FuncType::MAX_COUNT); i++)
+        for (int i = 1; i < static_cast<int>(FuncType::MAX_ALLOC_TEST_COUNT); i++)
         {
             FuncType funcType = static_cast<FuncType>(i);
 
@@ -304,12 +527,108 @@ public :
         NewLine();
     }
 
-    void CompareTest() {}
+    void CompareTest()
+    {
+
+        // 테스트 할 항목
+        // 싱글/멀티, 고정/랜덤, 풀의 L1 사이즈 미만/초과  << 이 조건들을 이용해 new/delete와 성능을 비교해보자.
+
+        // 멀티스레드 환경에서는 코어 수보다 스레드를 많이 생성하는 경우 / 적게 생성하는 경우로 나누도록 한다.
+        const int sizeCnt = GetAllocSizeCnt();
+
+        enum
+        {
+            SINGLE_SIZE_BELOW_L1 = 0,
+            SINGLE_SIZE_ABOVE_L1 = 1
+        };
+        // [0] : L1사이즈 미만, [1] : L1 사이즈 초과
+        const int singleSizeThreshold[2] = {jh::kNodeCountPerBlock - 1 ,jh::kNodeCountPerBlock * 2};
+
+        const int singleLoopCnt = 1e4;
+
+        printf("[Compare] - Simple Alloc Test Start (Single) \n");
+        // 1. 싱글, 고정, L1사이즈 미만
+        RecordSimpleAllocTest(singleSizeThreshold[SINGLE_SIZE_BELOW_L1], true, true, singleLoopCnt);
+        RecordSimpleAllocTest(singleSizeThreshold[SINGLE_SIZE_BELOW_L1], true, false, singleLoopCnt);
+
+        // 2. 싱글, 고정, L1사이즈 초과
+        RecordSimpleAllocTest(singleSizeThreshold[SINGLE_SIZE_ABOVE_L1], true, true, singleLoopCnt);
+        RecordSimpleAllocTest(singleSizeThreshold[SINGLE_SIZE_ABOVE_L1], true, false, singleLoopCnt);
+
+        printf("[Compare] - Simple Alloc Test End (Single)\n");
+        printf("[Compare] - Random Alloc Test Start (Single)\n");
+        // 3. 싱글, 랜덤, 풀의 L1 사이즈 미만
+        RecordRandomAllocTest(singleSizeThreshold[SINGLE_SIZE_BELOW_L1], true, true, singleLoopCnt);
+        RecordRandomAllocTest(singleSizeThreshold[SINGLE_SIZE_BELOW_L1], true, false, singleLoopCnt);
+
+        // 4. 싱글, 랜덤, 풀의 L1 사이즈 초과
+        RecordRandomAllocTest(singleSizeThreshold[SINGLE_SIZE_ABOVE_L1], true, true, singleLoopCnt);
+        RecordRandomAllocTest(singleSizeThreshold[SINGLE_SIZE_ABOVE_L1], true, false, singleLoopCnt);
+
+        printf("[Compare] - Random Alloc Test End (Single)\n");
+        ParamData data{};
+
+        // 스레드의 개수를 코어의 수보다 적게 / 많게 하는 경우 2가지
+        int threadCnt[2] = { GetAvailableProcessors() / 2 + 1, GetAvailableProcessors() + 4 };
+
+        data.m_iLoopCnt = singleLoopCnt;
+        data.m_pThis = this;
+
+        for (int i = 0; i < 2; i++)
+        {
+            const int tCnt = threadCnt[i];
+            printf("[Compare] - Thread %d Test Start (Multi)\n", tCnt);
+            data.m_pProdData = reinterpret_cast<ProdData*>(tCnt);
+            // RunThreads는 항상 여러 스레드 생성 -> 함수 호출 후 모든 스레드가 종료될때까지 대기한다. 순차적 실행
+
+            // 지금 코드에서는 하나의 항목에 대해 Pool / New를 실행하는 것이 아니라
+            // Pool / New에 대해 여러 항목을 쭉 실행한다.
+            for (int j = static_cast<int>(FuncType::RECORD_POOL_TEST); j < static_cast<int>(FuncType::MAX_ALL_TEST_CNT); j++)
+            {
+                // 할당 함수를 Pool / New 중 선택
+                data.m_funcType = static_cast<FuncType>(j);
+
+                // 할당 횟수 - L1 사이즈 미만으로 변경
+                data.m_iTargetCnt = singleSizeThreshold[SINGLE_SIZE_BELOW_L1];
+                
+                // L1 사이즈 미만 고정
+                data.m_role = static_cast<Role>(Pattern::SIMPLE);
+                RunThreads(tCnt, &data, true);
+
+                // L1 사이즈 미만 랜덤
+                data.m_role = static_cast<Role>(Pattern::RANDOM);
+                RunThreads(tCnt, &data, true);           
+                
+                // --------------------------------------------------------------------------------
+                
+                // 할당 횟수 - L1 사이즈 초과로 변경
+                data.m_iTargetCnt = singleSizeThreshold[SINGLE_SIZE_ABOVE_L1];
+               
+                // L1 사이즈 초과 고정
+                data.m_role = static_cast<Role>(Pattern::SIMPLE);
+                RunThreads(tCnt, &data, true);
+                // L1 사이즈 초과 랜덤
+
+                // L1 사이즈 미만 랜덤
+                data.m_role = static_cast<Role>(Pattern::RANDOM);
+                RunThreads(tCnt, &data, true);
+
+            }
+
+            printf("[Compare] - Thread %d Test End (Multi)\n", tCnt);
+
+        }
+    }
 private:
     enum class Role
     {
         PRODUCER = 0,
         CONSUMER,
+    };
+    enum class Pattern
+    {
+        SIMPLE,
+        RANDOM,
     };
     enum class FuncType
     {
@@ -322,7 +641,15 @@ private:
 
         // 스레드마다 할당/해제의 횟수를 다르게 설정해 테스트한다.
         RANDOM_ALLOC_TEST,
-        MAX_COUNT
+
+        MAX_ALLOC_TEST_COUNT,
+
+        // new delete 비교 테스트, 멀티스레드 환경의 여러 스레드에서 동시 실행을 위해 설정.
+        RECORD_POOL_TEST,
+        RECORD_NEW_TEST,
+
+        MAX_ALL_TEST_CNT,
+        
     };
     const char* GetFuncTypeStr(FuncType funcType)
     {
@@ -346,12 +673,14 @@ private:
     struct ParamData
     {
         FuncType m_funcType;    // 실행 함수 번호
-        int m_iTargetCnt;   // 반복 횟수
-        Role m_role;        // 생산자 / 소비자 역할
+        int m_iTargetCnt;   // 할당 반복 횟수
+        int m_iLoopCnt;     // 전체 반복 횟수
+        Role m_role;        // 생산자 / 소비자 역할, Compare Test의 경우 이 항목에 Simple / Random 을 넣는다.
         
-        ProdData* m_pProdData;
+        ProdData* m_pProdData; // 생산자 소비자 작업이 아닌 Compare Test의 경우 이 항목에 스레드 개수를 넣는다.
         MultiMode* m_pThis;
     };
+
     static unsigned WINAPI DoMulti(LPVOID lparam)
     {
         // 요소를 복사한다.
@@ -361,27 +690,92 @@ private:
 
         switch (params.m_funcType)
         {
-        case FuncType::DEFAULT_ALLOC_TEST: params.m_pThis->DefaultAllocTest(params.m_iTargetCnt);break;
-        case FuncType::PRODUCER_CONSUMER_TEST:params.m_pThis->ProducerConsumerTest(params.m_iTargetCnt, params.m_role, params.m_pProdData); break;
-        case FuncType::RANDOM_ALLOC_TEST: break;
+        case FuncType::DEFAULT_ALLOC_TEST: params.m_pThis->DefaultAllocTest(params.m_iTargetCnt, params.m_iTargetCnt, params.m_iLoopCnt);break;
+        case FuncType::PRODUCER_CONSUMER_TEST:params.m_pThis->ProducerConsumerTest(params.m_iTargetCnt, params.m_role, params.m_pProdData, params.m_iLoopCnt); break;
+        case FuncType::RANDOM_ALLOC_TEST: params.m_pThis->RandomAllocTest(params.m_iLoopCnt);  break;
+        case FuncType::RECORD_POOL_TEST:
+        {
+            int threadCnt = reinterpret_cast<int>(params.m_pProdData);
+            WCHAR buffer[20]{};
+            wsprintf(buffer, L"_Thread_Cnt_[%d]", threadCnt);
+
+            if (Pattern::SIMPLE == static_cast<Pattern>(params.m_role))
+            {
+                params.m_pThis->RecordSimpleAllocTest(params.m_iTargetCnt, false, true, params.m_iLoopCnt, buffer); break;
+            }
+            else
+            {
+                params.m_pThis->RecordRandomAllocTest(params.m_iTargetCnt, false, true, params.m_iLoopCnt, buffer); break;
+            }
+        }
+        case FuncType::RECORD_NEW_TEST:
+        {
+            int threadCnt = reinterpret_cast<int>(params.m_pProdData);
+            WCHAR buffer[20]{};
+            wsprintf(buffer, L"_Thread_Cnt_[%d]", threadCnt);
+
+            if (Pattern::SIMPLE == static_cast<Pattern>(params.m_role))
+            {
+                params.m_pThis->RecordSimpleAllocTest(params.m_iTargetCnt, false, false, params.m_iLoopCnt, buffer); break;
+            }
+            else
+            {
+                params.m_pThis->RecordRandomAllocTest(params.m_iTargetCnt, false, false, params.m_iLoopCnt, buffer); break;
+            }
+        }
         }
 
         return 0;
     }
-    void ProducerConsumerTest(int targetCnt, Role role, ProdData* prodData)
+
+    void RunThreads(int threadCnt, ParamData* data, bool isSimpleData)
+    {
+        std::vector<HANDLE> threads(threadCnt, nullptr);
+
+        for (int i = 0; i < threadCnt; i++)
+        {
+            threads[i] = reinterpret_cast<HANDLE>(_beginthreadex(nullptr, 0, &MultiMode::DoMulti,
+                isSimpleData ? static_cast<LPVOID>(data) : reinterpret_cast<LPVOID>(&data[i]), 0, nullptr));
+
+            ChkHandle(threads[i]);
+        }
+
+        // 한 번에 시작!
+        SetEvent(g_hStarterHandle);
+
+        DWORD ret = WaitForMultipleObjects(threadCnt, threads.data(), true, INFINITE);
+
+        if (ret >= WAIT_OBJECT_0 && ret < WAIT_OBJECT_0 + threadCnt)
+        {
+            printf("--------------- multi_thread_test_end ---------------\n");
+
+            for (int i = 0; i < threadCnt; i++)
+            {
+                ClearHandle(threads[i]);
+            }
+
+            ResetEvent(g_hStarterHandle);
+        }
+        else
+        {
+            jh_utility::CrashDump::Crash();
+        }
+
+    }
+    void ProducerConsumerTest(int targetCnt, Role role, ProdData* prodData, int loopRqstCnt)
     {
         // yet    
         printf("------------- RandomAllocTest..... ------------\n");
-        const int max_idx = GetMaxAllocSize();
+        const int max_idx = GetAllocSizeCnt();
 
   
         std::vector<void*>& vec = prodData->m_lockVec.m_vec;
         PSRWLOCK srwlock = &prodData->m_lockVec.m_lock;
 
-        for (int i = 0; i < g_iAllocLoopCnt; i++)
+        for (int i = 0; i < loopRqstCnt; i++)
         {
             if (i % 400 == 0)
-                printf("%s Thread ID : [%5d], loop_cnt : [%d]\n", role == Role::PRODUCER ? "Producer" : "Consumer", GetCurrentThreadId(), i);
+                printf("%s Thread ID : [%5d], loop_cnt : [%d]\n", role == Role::PRODUCER ? "Producer"   : "Consumer", GetCurrentThreadId(), i);
            
             SRWLockGuard lockGuard(srwlock);
 
@@ -400,7 +794,7 @@ private:
                 for (int j = 0; j < targetCnt; j++)
                 {
                     int rand_idx = jh::MyRandom::GetRandInt(0, max_idx - 1);
-                    vec[j] = g_pMemSystem->Alloc(g_iAllocSize[rand_idx]);
+                    vec[j] = g_pMemSystem->Alloc(g_kAllocSize[rand_idx]);
 
                     if (false == TestWrite(vec[j]))
                         jh_utility::CrashDump::Crash();    
@@ -436,13 +830,22 @@ private:
         }
     }
 
-    void RandomAllocTest(int targetCnt, int threadCnt)
+    // Alloc, Free의 횟수를 다르게 설정한다.
+    void RandomAllocTest(int loopRqstCnt)
     {
+        //printf("THREAD ID : [%5d], allocCnt : [%5d], freeCnt : [%5d]\n", GetCurrentThreadId(), allocRqstCnt, freeRqstCnt);
 
+        for (int i = 0; i < loopRqstCnt; i++)
+        {
+            const int allocRqstCnt = jh::MyRandom::GetRandInt(g_kRandMin / 2, g_kRandMax / 2);
+            const int freeRqstCnt = jh::MyRandom::GetRandInt(g_kRandMin / 2, g_kRandMax / 2);
+
+           if(freeRqstCnt > allocRqstCnt)
+            DefaultAllocTest(allocRqstCnt, allocRqstCnt, 1);
+        }
     }
     void MultiAllocTest(FuncType funcType, int targetCnt, int threadCnt)
     {
-        std::vector<HANDLE> threads(threadCnt, nullptr);
         const int groupCnt = threadCnt / 2 + 1;
         ParamData* data = new ParamData[threadCnt];
 
@@ -470,40 +873,13 @@ private:
             data[i].m_funcType = funcType;
             data[i].m_role = static_cast<Role>(static_cast<int>(i) % 2);
             data[i].m_iTargetCnt = targetCnt;
+            data[i].m_iLoopCnt = kAllocLoopCnt;
             data[i].m_pThis = this;
-
             data[i].m_pProdData = prodData == nullptr ? nullptr : &prodData[groupNum];
         }
     
-
-        for (int i = 0; i < threadCnt; i++)
-        {
-            threads[i] = reinterpret_cast<HANDLE>(_beginthreadex(nullptr, 0, &MultiMode::DoMulti, reinterpret_cast<LPVOID>(&data[i]), 0, nullptr));
-
-            ChkHandle(threads[i]);
-        }
-
-        // 한 번에 시작!
-        SetEvent(g_hStarterHandle);
-
-        DWORD ret = WaitForMultipleObjects(threadCnt, threads.data(), true, INFINITE);
-
-        if (ret >= WAIT_OBJECT_0 && ret < WAIT_OBJECT_0 + threadCnt)
-        {
-            printf("--------------- multi_thread_test_end ---------------\n");
-
-            for (int i = 0; i < threadCnt; i++)
-            {
-                ClearHandle(threads[i]);
-            }
-
-            ResetEvent(g_hStarterHandle);
-        }
-        else
-        {
-            jh_utility::CrashDump::Crash();
-        }
-
+        RunThreads(threadCnt, data, false);
+      
         delete[] prodData;
         delete[] data;
 
@@ -549,6 +925,12 @@ int main(int argc, char* argv[])
 
     InitMain();
     
+    printf("저장할 파일 명을 입력하세요 : ");
+
+    WCHAR buffer[100]{};
+
+    fgetws(buffer, sizeof(buffer) / sizeof(buffer[0]), stdin);
+    wcscat_s(buffer, L".txt");
     bool end_flag = false;
     while (false == end_flag)
     {
@@ -565,7 +947,7 @@ int main(int argc, char* argv[])
     }
 
     PRO_SAVE("MemoryTest.txt");
-
+    
     ClearMain();
     printf("--------------- 종료합니다 ---------------\n");
 
