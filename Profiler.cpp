@@ -192,12 +192,13 @@ void jh_utility::Profiler::ProfileDataOutText(const WCHAR* fileName)
 
 	if (0 != wfOpenError || nullptr == file)
 	{
+		printf("[ProfileDatOutText] : File Open Error\n");
 		return;
 	}
 
 	// 우측정렬 
 	// THREAD \t | NAME \t | ... 의 형태로 생성
-	fwprintf_s(file, L"%15s | %70s | %17s | %17s | %17s | %15s |\n", L"THREADID", L"FUNC", L"AVERAGE", L"MIN", L"MAX", L"CALL");;
+	fwprintf_s(file, L"%15s | %130s | %17s | %17s | %17s | %15s |\n", L"THREADID", L"FUNC", L"AVERAGE", L"MIN", L"MAX", L"CALL");;
 	fwprintf_s(file, L"-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n\n");
 
 	for (auto& pair : m_profilerMap)
@@ -212,7 +213,7 @@ void jh_utility::Profiler::ProfileDataOutText(const WCHAR* fileName)
 			double minTime = sample.m_ullCallCount <= 2 ? (double)sample.m_ullMinTime[0] : (double)sample.m_ullMinTime[1];
 			double maxTime = sample.m_ullCallCount <= 2 ? (double)sample.m_ullMaxTime[0] : (double)sample.m_ullMaxTime[1];
 			// min, max는 2번째꺼 출력.
-			fwprintf_s(file, L"%15u | %70s | %15.6lf㎲ | %15.6lf㎲ | %15.6lf㎲ | %15u |\n", sample.m_dwThreadId, sample.m_wszSampleName,
+			fwprintf_s(file, L"%15u | %130s | %15.6lf㎲ | %15.6lf㎲ | %15.6lf㎲ | %15u |\n", sample.m_dwThreadId, sample.m_wszSampleName,
 				(double)sample.m_ullTotalTime / sample.m_ullCallCount * MICRO_SCALE(m_llQueryPerformanceFrequency.QuadPart), // AVERAGE
 				minTime * MICRO_SCALE(m_llQueryPerformanceFrequency.QuadPart), // MIN
 				maxTime * MICRO_SCALE(m_llQueryPerformanceFrequency.QuadPart), // MAX

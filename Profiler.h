@@ -3,8 +3,8 @@
 
 #include <map>
 
-#define MAX_SAMPLE_COUNT 50
-#define SAMPLE_NAME_LEN 64
+#define MAX_SAMPLE_COUNT 128
+#define SAMPLE_NAME_LEN 128
 
 #define PROF_WIDE2(x) L##x
 #define PROF_WIDE1(x) PROF_WIDE2(x)
@@ -23,6 +23,7 @@
 
 #define PRO_RESET jh_utility::Profiler::GetInstance().DataReset()
 #define PRO_SAVE(FILE_NAME) jh_utility::Profiler::GetInstance().ProfileDataOutText(L##FILE_NAME) 
+#define PRO_WSAVE(FILE_NAME) jh_utility::Profiler::GetInstance().ProfileDataOutText(FILE_NAME) 
 #define ARRAY_SIZE(ARR) (sizeof(ARR) / sizeof(ARR[0]))
 
 #define MILLI_SCALE(qpfrequency) ((double)1'000 / (double)qpfrequency)
