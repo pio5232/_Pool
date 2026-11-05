@@ -96,5 +96,6 @@ jh::Node* jh::MemoryAllocator::NodeStack::Pop()
 
 	m_pMainHead = m_pMainHead->m_pNextNode;
 	m_mainCount--;
+
 	return ret;
 }

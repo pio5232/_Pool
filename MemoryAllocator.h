@@ -55,6 +55,10 @@ namespace jh
 		{
 			m_nodeStack[poolIdx].m_pMainHead = m_pPool[poolIdx]->TryPopBlock();
 			m_nodeStack[poolIdx].m_mainCount = m_nodeStack[poolIdx].m_pMainHead->m_blockSize;
+
+#ifdef JH_POOL_TEST
+			m_nodeStack[poolIdx].m_pMainHead->m_blockSize = 0;
+#endif
 		}
 
 		// 데이터가 위치한 포인터만 전달하도록 한다.

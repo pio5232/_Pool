@@ -515,7 +515,7 @@ public :
 
             const int half = (30 - strlen(GetFuncTypeStr(funcType))) / 2;
             // 가운데 정렬 출력
-            printf("FuncType : [%*s%-*s], request Count : [%d]\n", half, " ", strlen(GetFuncTypeStr(funcType)) + half, GetFuncTypeStr(funcType), allocRqstCnt);
+            printf("FuncType : [%*s%-*s], request Count : [%d]\n", half, " ", static_cast<int>(strlen(GetFuncTypeStr(funcType))) + half, GetFuncTypeStr(funcType), allocRqstCnt);
             MultiAllocTest(funcType, allocRqstCnt, threadCnt);
 
             g_pMemSystem->PrintMemoryUsage();
@@ -542,7 +542,7 @@ public :
         const int singleSizeThreshold[2] = {jh::kNodeCountPerBlock - 3 ,jh::kNodeCountPerBlock * 4};
         
         const int randMultiplier = GetAllocSizeCnt();
-        const int singleLoopCnt = 5e4;
+        const int singleLoopCnt = 1e5; //5e4;
 
         printf("[Compare] - Simple Alloc Test Start (Single) \n");
         {
@@ -700,8 +700,9 @@ private:
         case FuncType::DEFAULT_ALLOC_TEST:
         {        
             printf("------------------ THREAD [%d] Multi - AllocTest ------------------\n", GetCurrentThreadId());
-            params.m_pThis->DefaultAllocTest(params.m_iTargetCnt, params.m_iTargetCnt, params.m_iLoopCnt); break;
+            params.m_pThis->DefaultAllocTest(params.m_iTargetCnt, params.m_iTargetCnt, params.m_iLoopCnt); \
             printf("------------------------ [Multi - AllocTest]\t\tThread ID : [%5d] End ------------------------\n", GetCurrentThreadId());
+            break;
         }
         case FuncType::PRODUCER_CONSUMER_TEST:params.m_pThis->ProducerConsumerTest(params.m_iTargetCnt, params.m_role, params.m_pProdData, params.m_iLoopCnt); break;
         case FuncType::RANDOM_ALLOC_TEST: params.m_pThis->RandomAllocTest(params.m_iLoopCnt);  break;

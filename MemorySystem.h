@@ -38,7 +38,7 @@ namespace jh
 		/// LEVEL 2. memoryAllocator가 소유한 노드가 부족해지면 m_pool에게서 얻어온다.
 		/// </summary>
 		MemoryPool* m_poolArr[kPoolCount];
-
+	
 		/// <summary>
 		/// LEVEL 3. 최종적인 메모리 할당기. 
 		/// VirtualAlloc을 통해 할당한 메모리를 전달한다.

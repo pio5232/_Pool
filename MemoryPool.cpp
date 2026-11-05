@@ -73,7 +73,8 @@ jh::Node* jh::MemoryPool::TryPopBlock()
 	}
 
 	ALLOC_COUNT_CHECK(InterlockedAdd64(&m_llL2AllocNodeCount, static_cast<LONGLONG>(topNodePointer->m_blockSize));)
-		return topNodePointer;
+		
+	return topNodePointer;
 }
 
 
@@ -180,6 +181,7 @@ jh::Node* jh::MemoryPool::GetNewBlock()
 			Node* lastBlock = nullptr;
 
 			// 블럭 단위로 연결
+			// 현재 : 요청하는 노드 크기에 상관없이 총 4096개의 노드가 만들어지며, 512개의 노드가 뭉친 Block이 8개 생성된다.
 			for (; numOfBlock < kBlockCountToCreate; numOfBlock++)
 			{
 				size_t addr = reinterpret_cast<size_t>(allocatedPoitner) + (numOfBlock * m_kAllocSize * kNodeCountPerBlock);

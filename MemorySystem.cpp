@@ -79,13 +79,15 @@ jh::MemorySystem::~MemorySystem()
 void* jh::MemorySystem::Alloc(size_t reqSize)
 {
     MEMORY_POOL_PROFILE_FLAG;
-    size_t allocSize = reqSize + sizeof(size_t);
+    //size_t allocSize = reqSize + sizeof(size_t);
+    size_t allocSize = reqSize + MemoryHeader::GetExtraSize();
 
     void* pAddr;
 
     if (allocSize > kMaxAllocSize)
     {
-        pAddr = new char[allocSize];
+        //pAddr = new char[allocSize];
+        pAddr = ::operator new(allocSize);
     }
     else
     {
@@ -109,7 +111,8 @@ void jh::MemorySystem::Free(void* ptr)
 
     if (allocSize > kMaxAllocSize)
     {
-        delete[] basePtr;
+        :: operator delete(basePtr, allocSize);
+        //delete[] basePtr;
         return;
     }
 

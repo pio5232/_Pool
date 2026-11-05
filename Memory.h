@@ -6,6 +6,10 @@
 // alloc / free 계산용 플래그 
 //#define JH_MEM_ALLOC_CHECK_FLAG
 
+// Pool Test는 유저가 할당받은 메모리 공간이 0으로 초기화된다는 것을 전제로 한다.
+// 실제 환경에서는 초기화하지 않아도 되나, Single 및 Multi 중복 테스트를 위해 Node의 m_blockSize와 Debug모드 시 rearGuard부분을 0으로 초기화하는 코드 삽입을 위해 생성. 
+// 이 플래그는 싱글 / 멀티스레드 중복 할당 전용 테스트 플래그이다.
+#define JH_POOL_TEST
 
 // 메모리 추가/제거 카운팅을 위한 정보. 디버깅할때만 플래그를 이용해 탐지하도록 한다.
 #ifdef JH_MEM_ALLOC_CHECK_FLAG
@@ -52,7 +56,7 @@ namespace jh
 	/// [	[size_t]					[Data]				[ ]						]
 	/// 
 	/// [LEVEL 2] memoryPool을 통해서 사용될 때 Node의 구조
-	/// [	[m_llNextComplexBlock]		[m_blockSize]		[m_pNextNode]			]
+	/// [	[m_llNextComplexBlock]		[m_pNextNode]		[m_blockSize]			]
 	///  
 	/// 현재 Block과 Node의 차이
 	/// 
@@ -63,8 +67,8 @@ namespace jh
 	struct Node
 	{
 		LONGLONG m_llNextComplexBlock; // L2 에서 Block의 할당/해제에 사용된다. 앞에 counter가 붙는다.
-		size_t m_blockSize; // L2 에서 Block의 할당/해제에 사용된다
 		Node* m_pNextNode;
+		size_t m_blockSize; // L2 에서 Block의 할당/해제에 사용된다
 	};
 
 	// 64 / 128 / 256 / 512 / 1024 / 2048 / 4096
